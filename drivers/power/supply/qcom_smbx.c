@@ -1147,6 +1147,12 @@ skip_float_voltage:
 		return dev_err_probe(chip->dev, rc,
 				     "Couldn't write fast charge current cfg");
 
+	rc = regmap_write_bits(chip->regmap, chip->base + AICL_RERUN_TIME_CFG,
+			       AICL_RERUN_TIME_MASK, AIC_RERUN_TIME_3_SECS);
+	if (rc < 0)
+		return dev_err_probe(chip->dev, rc,
+				     "Couldn't write fast AICL rerun time");
+
 	/* Initialise charger state */
 	schedule_delayed_work(&chip->status_change_work, 0);
 
