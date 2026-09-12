@@ -74,7 +74,7 @@
 		 * 75 mV downstream is paired with thermal management
 		 * that mainline does not yet have.
 		 */
-		voltage-max-design-microvolt = <3799168>;
+		voltage-max-design-microvolt = <4400000>;
 	};
 
 	chosen {
