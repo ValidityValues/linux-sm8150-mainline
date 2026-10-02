@@ -1,0 +1,32 @@
+name: Mirror SM8150 Mainline source to GitHub
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '11 3 * * 0'
+permissions:
+  contents: write
+concurrency:
+  group: mirror-sm8150-upstream
+  cancel-in-progress: false
+jobs:
+  mirror:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - name: Mirror upstream refs without replacing main
+        env:
+          UPSTREAM: https://gitlab.postmarketos.org/soc/qualcomm-sm8150/linux.git
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git init mirror
+          git -C mirror remote add upstream "$UPSTREAM"
+          git -C mirror fetch --prune --tags upstream '+refs/heads/*:refs/remotes/upstream/*'
+          git -C mirror remote add github "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git -C mirror config user.name 'github-actions[bot]'
+          git -C mirror config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          while IFS= read -r branch; do
+            [ -n "$branch" ] || continue
+            git -C mirror push --force github "refs/remotes/upstream/$branch:refs/heads/upstream/$branch"
+          done < <(git -C mirror for-each-ref --format='%(refname:strip=3)' refs/remotes/upstream)
+          git -C mirror push --force github 'refs/tags/*:refs/tags/*'
