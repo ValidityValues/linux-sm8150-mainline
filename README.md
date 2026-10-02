@@ -5,7 +5,7 @@ This repository contains build automation and provenance for Linux on the Snapdr
 ## Tracks
 
 - **Device-support baseline:** SM8150-specific kernel source and Pixel 4 DTB. Default ref is `v6.17.0-sm8150`; always review the source manifest.
-- **Latest stable experiment:** resolves kernel.org's latest stable release at run time. This is a compile/porting experiment, not a device-validated kernel. Copying an old config/DTS does not port downstream drivers.
+- **Latest stable experiment:** `build-latest-stable.yml` resolves and verifies the current stable kernel.org tarball, merges the SM8150 config fragment, overlays the Pixel 4 DTS, and attempts to build Image/modules/DTB. This is an experiment, not a device-validated kernel; older downstream patches and device-specific drivers are not automatically ported.
 - **Upstream mirror:** preserves upstream branches/tags in this repo without overwriting our `main` branch.
 
 ## Actions
@@ -14,7 +14,7 @@ This repository contains build automation and provenance for Linux on the Snapdr
 2. Run **Build SM8150 device-support kernel** with the known SM8150 device-support ref.
 3. Run **Build latest stable upstream kernel (experimental)** separately.
 
-Build artifacts include kernel Image, Pixel 4 DTB when available, config, System.map, modules, manifests and SHA-256 sums. Nothing in these workflows flashes a phone.
+Build artifacts include kernel Image, Pixel 4 DTB, config, System.map, module archive, Wi-Fi/Bluetooth kernel-config audit, manifests and SHA-256 sums. The device-support build attempts to enable CFG80211/MAC80211, ath10k SNOC, Bluetooth QCA UART, QRTR, and compressed firmware support where those symbols exist in the selected source. Review `wifi-bluetooth-kernel-config.txt`; requested Kconfig symbols can be removed by `olddefconfig` when dependencies or source support are absent. Nothing in these workflows flashes a phone.
 
 ## Device and recovery safety
 
