@@ -50,7 +50,7 @@ jobs:
                   if index is None:
                       raise SystemExit("Cannot safely patch idtp9418.c: include block not found")
                   lines.insert(index, header)
-                  p.write_text("\\n".join(lines) + "\\n")
+                  p.write_text("\n".join(lines) + "\n")
                   print("Applied missing gpio consumer header")
           PY
           git -C kernel diff -- drivers/power/supply/idtp9418.c > idtp9418-gpio-header.patch
