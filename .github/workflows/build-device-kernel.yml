@@ -36,6 +36,24 @@ jobs:
           git clone --filter=blob:none --no-checkout "$SRC" kernel
           git -C kernel fetch --force --tags origin
           git -C kernel checkout --detach "$REF"
+          # Compatibility fix: downstream idtp9418 uses descriptor GPIO APIs but
+          # omits the header that declares them in this source revision.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("kernel/drivers/power/supply/idtp9418.c")
+          if p.exists():
+              s = p.read_text()
+              header = "#include <linux/gpio/consumer.h>"
+              if header not in s:
+                  lines = s.splitlines()
+                  index = next((i for i, line in enumerate(lines) if line.startswith("#include ")), None)
+                  if index is None:
+                      raise SystemExit("Cannot safely patch idtp9418.c: include block not found")
+                  lines.insert(index, header)
+                  p.write_text("\\n".join(lines) + "\\n")
+                  print("Applied missing gpio consumer header")
+          PY
+          git -C kernel diff -- drivers/power/supply/idtp9418.c > idtp9418-gpio-header.patch
           git -C kernel log -1 --format='source_commit=%H%nsubject=%s' | tee source.txt
           test -f kernel/arch/arm64/configs/sm8150.config
       - name: Build kernel, modules and DTBs
@@ -62,10 +80,12 @@ jobs:
           grep -E '^CONFIG_(CFG80211|MAC80211|ATH10K|ATH10K_SNOC|BT=|BT_HCIUART|BT_HCIUART_QCA|QRTR|QRTR_SMD|QCOM_QMI_HELPERS|FW_LOADER_COMPRESS)' out/.config > "$GITHUB_WORKSPACE/stage/wifi-bluetooth-kernel-config.txt" || true
           printf 'ref=%s\nkernelrelease=%s\n' "$REF" "$REL" > "$GITHUB_WORKSPACE/stage/MANIFEST.txt"
           cat "$GITHUB_WORKSPACE/source.txt" >> "$GITHUB_WORKSPACE/stage/MANIFEST.txt"
+          printf 'compatibility_patch=idtp9418 missing GPIO consumer include if required; see idtp9418-gpio-header.patch\n' >> "$GITHUB_WORKSPACE/stage/MANIFEST.txt"
+          cp "$GITHUB_WORKSPACE/idtp9418-gpio-header.patch" "$GITHUB_WORKSPACE/stage/"
           printf 'wifi_bluetooth=kernel options enabled where supported; see wifi-bluetooth-kernel-config.txt\n' >> "$GITHUB_WORKSPACE/stage/MANIFEST.txt"
           printf 'device_validation=not yet performed on physical google-flame\n' >> "$GITHUB_WORKSPACE/stage/MANIFEST.txt"
           cd "$GITHUB_WORKSPACE/stage"
-          sha256sum Image sm8150-google-flame.dtb config System.map modules.tar.zst wifi-bluetooth-kernel-config.txt > SHA256SUMS
+          sha256sum Image sm8150-google-flame.dtb config System.map modules.tar.zst wifi-bluetooth-kernel-config.txt idtp9418-gpio-header.patch > SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
           name: flame-kernel-device-support-${{ github.run_number }}
