@@ -33,9 +33,11 @@ jobs:
           sudo apt-get install -y bc bison build-essential cpio flex gcc-aarch64-linux-gnu git libelf-dev libssl-dev lz4 pahole python3 rsync zstd
       - name: Fetch source
         run: |
-          git clone --filter=blob:none --no-checkout "$SRC" kernel
-          git -C kernel fetch --force --tags origin
-          git -C kernel checkout --detach "$REF"
+          # Fetch only the requested ref; avoid downloading the entire tag history.
+          git init kernel
+          git -C kernel remote add origin "$SRC"
+          git -C kernel fetch --depth=1 origin "$REF"
+          git -C kernel checkout --detach FETCH_HEAD
           # Compatibility fix: downstream idtp9418 uses descriptor GPIO APIs but
           # omits the header that declares them in this source revision.
           python3 - <<'PY'
@@ -72,6 +74,9 @@ jobs:
           REL="$(make ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" O=out -s kernelrelease)"
           mkdir -p "$GITHUB_WORKSPACE/stage"
           cp out/arch/arm64/boot/Image "$GITHUB_WORKSPACE/stage/Image"
+          # With CONFIG_EFI_STUB, ARM64 Image carries the EFI stub; retain an EFI-named copy for U-Boot EFI workflows.
+          cp out/arch/arm64/boot/Image "$GITHUB_WORKSPACE/stage/linux.efi"
+          file "$GITHUB_WORKSPACE/stage/Image" > "$GITHUB_WORKSPACE/stage/kernel-file-type.txt"
           cp "$DTB" "$GITHUB_WORKSPACE/stage/sm8150-google-flame.dtb"
           cp out/.config "$GITHUB_WORKSPACE/stage/config"
           cp out/System.map "$GITHUB_WORKSPACE/stage/System.map"
@@ -85,7 +90,7 @@ jobs:
           printf 'wifi_bluetooth=kernel options enabled where supported; see wifi-bluetooth-kernel-config.txt\n' >> "$GITHUB_WORKSPACE/stage/MANIFEST.txt"
           printf 'device_validation=not yet performed on physical google-flame\n' >> "$GITHUB_WORKSPACE/stage/MANIFEST.txt"
           cd "$GITHUB_WORKSPACE/stage"
-          sha256sum Image sm8150-google-flame.dtb config System.map modules.tar.zst wifi-bluetooth-kernel-config.txt idtp9418-gpio-header.patch > SHA256SUMS
+          sha256sum Image linux.efi sm8150-google-flame.dtb config System.map modules.tar.zst wifi-bluetooth-kernel-config.txt idtp9418-gpio-header.patch kernel-file-type.txt > SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
           name: flame-kernel-device-support-${{ github.run_number }}
