@@ -1,0 +1,90 @@
+name: Build latest stable upstream Linux (experimental port)
+on:
+  workflow_dispatch:
+    inputs:
+      device_support_ref:
+        description: SM8150 device-support ref used for config and Pixel 4 DTS
+        required: true
+        default: v6.17.0-sm8150
+  schedule:
+    - cron: '17 6 * * 2'
+permissions:
+  contents: read
+concurrency:
+  group: latest-stable-kernel
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    env:
+      DEVICE_SRC: https://gitlab.postmarketos.org/soc/qualcomm-sm8150/linux.git
+      DEVICE_REF: ${{ inputs.device_support_ref || 'v6.17.0-sm8150' }}
+      CROSS_COMPILE: aarch64-linux-gnu-
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential cpio curl flex gcc-aarch64-linux-gnu git gnupg jq libelf-dev libssl-dev lz4 pahole python3 rsync zstd
+      - name: Resolve and verify latest stable kernel.org release
+        run: |
+          set -euxo pipefail
+          mkdir -p download stage
+          VERSION="$(curl -fsSL https://www.kernel.org/releases.json | jq -r '.latest_stable.version')"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          MAJOR="${VERSION%%.*}"
+          URL="https://cdn.kernel.org/pub/linux/kernel/v${MAJOR}.x/linux-${VERSION}.tar.xz"
+          curl -fL --retry 5 "$URL" -o "download/linux-${VERSION}.tar.xz"
+          curl -fL --retry 5 "$URL.sign" -o "download/linux-${VERSION}.tar.xz.sign"
+          curl -fL --retry 5 'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x647F28654894E3BD457199BE38DBBDC86092693E' | gpg --batch --import
+          FPR="$(gpg --batch --with-colons --fingerprint 647F28654894E3BD457199BE38DBBDC86092693E | awk -F: '$1=="fpr" {print $10; exit}')"
+          test "$FPR" = 647F28654894E3BD457199BE38DBBDC86092693E
+          gpg --batch --verify "download/linux-${VERSION}.tar.xz.sign" "download/linux-${VERSION}.tar.xz"
+          echo "$VERSION" > stage/upstream-version.txt
+      - name: Fetch Pixel 4 device support reference
+        run: |
+          set -euxo pipefail
+          git clone --filter=blob:none --no-checkout "$DEVICE_SRC" device-support
+          git -C device-support fetch --force --tags origin
+          git -C device-support checkout --detach "$DEVICE_REF"
+          git -C device-support log -1 --format='device_support_commit=%H%nsubject=%s' | tee stage/device-support-source.txt
+          test -s device-support/arch/arm64/configs/sm8150.config
+          test -s device-support/arch/arm64/boot/dts/qcom/sm8150-google-flame.dts
+      - name: Merge device config and build latest stable kernel
+        run: |
+          set -euxo pipefail
+          VERSION="$(cat stage/upstream-version.txt)"
+          tar -xf "download/linux-${VERSION}.tar.xz"
+          mv "linux-${VERSION}" kernel
+          # Overlay only the device DTS from the known-good SM8150 tree. This remains an experimental port.
+          cp device-support/arch/arm64/boot/dts/qcom/sm8150-google-flame.dts kernel/arch/arm64/boot/dts/qcom/
+          cd kernel
+          make ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" O=out defconfig
+          scripts/kconfig/merge_config.sh -m -O out out/.config ../device-support/arch/arm64/configs/sm8150.config
+          scripts/config --file out/.config --enable EFI --enable EFI_STUB --enable EXT4_FS --enable DEVTMPFS --enable DEVTMPFS_MOUNT --enable BLK_DEV_INITRD
+          scripts/config --file out/.config --enable CFG80211 --enable MAC80211 --module ATH10K --module ATH10K_SNOC --enable BT --module BT_HCIUART --module BT_HCIUART_QCA --module QRTR --module QRTR_SMD --module QCOM_QMI_HELPERS --enable FW_LOADER_COMPRESS --enable FW_LOADER_COMPRESS_ZSTD --enable FW_LOADER_COMPRESS_XZ
+          make ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" O=out olddefconfig
+          make -j"$(nproc)" ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" O=out Image modules arch/arm64/boot/dts/qcom/sm8150-google-flame.dtb
+          REL="$(make ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" O=out -s kernelrelease)"
+          mkdir -p "$GITHUB_WORKSPACE/stage/modules"
+          cp out/arch/arm64/boot/Image "$GITHUB_WORKSPACE/stage/Image"
+          cp out/arch/arm64/boot/dts/qcom/sm8150-google-flame.dtb "$GITHUB_WORKSPACE/stage/sm8150-google-flame.dtb"
+          cp out/.config "$GITHUB_WORKSPACE/stage/config"
+          cp out/System.map "$GITHUB_WORKSPACE/stage/System.map"
+          make ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" O=out INSTALL_MOD_PATH="$GITHUB_WORKSPACE/stage/modules" modules_install
+          tar --zstd -cf "$GITHUB_WORKSPACE/stage/modules.tar.zst" -C "$GITHUB_WORKSPACE/stage/modules" lib/modules
+          grep -E '^CONFIG_(CFG80211|MAC80211|ATH10K|ATH10K_SNOC|BT=|BT_HCIUART|BT_HCIUART_QCA|QRTR|QRTR_SMD|QCOM_QMI_HELPERS|FW_LOADER_COMPRESS)' out/.config > "$GITHUB_WORKSPACE/stage/wifi-bluetooth-kernel-config.txt" || true
+          printf 'upstream_kernel_version=%s\nkernelrelease=%s\n' "$VERSION" "$REL" > "$GITHUB_WORKSPACE/stage/MANIFEST.txt"
+          cat "$GITHUB_WORKSPACE/stage/device-support-source.txt" >> "$GITHUB_WORKSPACE/stage/MANIFEST.txt"
+          printf 'status=EXPERIMENTAL_PORT_NOT_HARDWARE_VALIDATED\n' >> "$GITHUB_WORKSPACE/stage/MANIFEST.txt"
+          printf 'warning=This does not prove downstream patches or Pixel 4 peripherals are fully ported.\n' >> "$GITHUB_WORKSPACE/stage/MANIFEST.txt"
+          cd "$GITHUB_WORKSPACE/stage"
+          sha256sum Image sm8150-google-flame.dtb config System.map modules.tar.zst wifi-bluetooth-kernel-config.txt > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flame-kernel-latest-stable-experimental-${{ github.run_number }}
+          path: stage/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
