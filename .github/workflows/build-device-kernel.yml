@@ -44,6 +44,8 @@ jobs:
           cd kernel
           make ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" O=out sm8150.config
           scripts/config --file out/.config --enable EFI --enable EFI_STUB --enable EXT4_FS --enable DEVTMPFS --enable DEVTMPFS_MOUNT --enable BLK_DEV_INITRD
+          # Best-effort enablement for WCN399x/ath10k Wi-Fi, QCA UART Bluetooth, QRTR and compressed firmware.
+          scripts/config --file out/.config --enable CFG80211 --enable MAC80211 --module ATH10K --module ATH10K_SNOC --enable BT --module BT_HCIUART --module BT_HCIUART_QCA --module QRTR --module QRTR_SMD --module QCOM_QMI_HELPERS --enable FW_LOADER_COMPRESS --enable FW_LOADER_COMPRESS_ZSTD --enable FW_LOADER_COMPRESS_XZ
           make ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" O=out olddefconfig
           make -j"$(nproc)" ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" O=out Image modules dtbs
           DTB="$(find out/arch/arm64/boot/dts -type f -name sm8150-google-flame.dtb -print -quit)"
@@ -56,10 +58,13 @@ jobs:
           cp out/.config out/System.map "$GITHUB_WORKSPACE/stage/"
           make ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" O=out INSTALL_MOD_PATH="$GITHUB_WORKSPACE/stage/modules" modules_install
           tar --zstd -cf "$GITHUB_WORKSPACE/stage/modules.tar.zst" -C "$GITHUB_WORKSPACE/stage/modules" lib/modules
+          grep -E '^CONFIG_(CFG80211|MAC80211|ATH10K|ATH10K_SNOC|BT=|BT_HCIUART|BT_HCIUART_QCA|QRTR|QRTR_SMD|QCOM_QMI_HELPERS|FW_LOADER_COMPRESS)' out/.config > "$GITHUB_WORKSPACE/stage/wifi-bluetooth-kernel-config.txt" || true
           printf 'ref=%s\nkernelrelease=%s\n' "$REF" "$REL" > "$GITHUB_WORKSPACE/stage/MANIFEST.txt"
           cat "$GITHUB_WORKSPACE/source.txt" >> "$GITHUB_WORKSPACE/stage/MANIFEST.txt"
+          printf 'wifi_bluetooth=kernel options enabled where supported; see wifi-bluetooth-kernel-config.txt\n' >> "$GITHUB_WORKSPACE/stage/MANIFEST.txt"
+          printf 'device_validation=not yet performed on physical google-flame\n' >> "$GITHUB_WORKSPACE/stage/MANIFEST.txt"
           cd "$GITHUB_WORKSPACE/stage"
-          sha256sum Image sm8150-google-flame.dtb config System.map modules.tar.zst > SHA256SUMS
+          sha256sum Image sm8150-google-flame.dtb config System.map modules.tar.zst wifi-bluetooth-kernel-config.txt > SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
           name: flame-kernel-device-support-${{ github.run_number }}
