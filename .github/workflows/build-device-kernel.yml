@@ -55,7 +55,8 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/stage"
           cp out/arch/arm64/boot/Image "$GITHUB_WORKSPACE/stage/Image"
           cp "$DTB" "$GITHUB_WORKSPACE/stage/sm8150-google-flame.dtb"
-          cp out/.config out/System.map "$GITHUB_WORKSPACE/stage/"
+          cp out/.config "$GITHUB_WORKSPACE/stage/config"
+          cp out/System.map "$GITHUB_WORKSPACE/stage/System.map"
           make ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" O=out INSTALL_MOD_PATH="$GITHUB_WORKSPACE/stage/modules" modules_install
           tar --zstd -cf "$GITHUB_WORKSPACE/stage/modules.tar.zst" -C "$GITHUB_WORKSPACE/stage/modules" lib/modules
           grep -E '^CONFIG_(CFG80211|MAC80211|ATH10K|ATH10K_SNOC|BT=|BT_HCIUART|BT_HCIUART_QCA|QRTR|QRTR_SMD|QCOM_QMI_HELPERS|FW_LOADER_COMPRESS)' out/.config > "$GITHUB_WORKSPACE/stage/wifi-bluetooth-kernel-config.txt" || true
