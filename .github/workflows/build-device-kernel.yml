@@ -33,9 +33,11 @@ jobs:
           sudo apt-get install -y bc bison build-essential cpio flex gcc-aarch64-linux-gnu git libelf-dev libssl-dev lz4 pahole python3 rsync zstd
       - name: Fetch source
         run: |
-          # A shallow clone with --branch works for either a branch or a tag.
-          # It avoids a separate fetch of every tag from the large kernel repository.
-          git clone --depth=1 --branch "$REF" "$SRC" kernel
+          # Initialize an empty repo and fetch only the requested ref, not the full source snapshot.
+          git init kernel
+          git -C kernel remote add origin "$SRC"
+          git -C kernel fetch --depth=1 origin "$REF"
+          git -C kernel checkout --detach FETCH_HEAD
           # Compatibility fix: downstream idtp9418 uses descriptor GPIO APIs but
           # omits the header that declares them in this source revision.
           python3 - <<'PY'
