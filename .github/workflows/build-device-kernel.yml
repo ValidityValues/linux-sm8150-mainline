@@ -62,11 +62,16 @@ jobs:
         run: |
           set -euxo pipefail
           cd kernel
-          make ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" O=out sm8150.config
-          scripts/config --file out/.config --enable EFI --enable EFI_STUB --enable EXT4_FS --enable DEVTMPFS --enable DEVTMPFS_MOUNT --enable BLK_DEV_INITRD
+          # sm8150.config is a fragment, not a standalone defconfig. Start with ARM64's
+          # complete defconfig and merge the SM8150 fragment so ARCH_QCOM and DTB targets exist.
+          make ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" O=out defconfig
+          scripts/kconfig/merge_config.sh -m -O out out/.config arch/arm64/configs/sm8150.config
+          scripts/config --file out/.config --enable EFI --enable EFI_STUB --enable EXT4_FS --enable DEVTMPFS --enable DEVTMPFS_MOUNT --enable BLK_DEV_INITRD --disable LOCALVERSION_AUTO
           # Best-effort enablement for WCN399x/ath10k Wi-Fi, QCA UART Bluetooth, QRTR and compressed firmware.
           scripts/config --file out/.config --enable CFG80211 --enable MAC80211 --module ATH10K --module ATH10K_SNOC --enable BT --module BT_HCIUART --module BT_HCIUART_QCA --module QRTR --module QRTR_SMD --module QCOM_QMI_HELPERS --enable FW_LOADER_COMPRESS --enable FW_LOADER_COMPRESS_ZSTD --enable FW_LOADER_COMPRESS_XZ
           make ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" O=out olddefconfig
+          grep -q '^CONFIG_ARCH_QCOM=y' out/.config
+          test -s arch/arm64/boot/dts/qcom/sm8150-google-flame.dts
           make -j"$(nproc)" ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" O=out Image modules dtbs
           DTB="$(find out/arch/arm64/boot/dts -type f -name sm8150-google-flame.dtb -print -quit)"
           test -s out/arch/arm64/boot/Image
