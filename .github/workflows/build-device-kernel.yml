@@ -1,0 +1,68 @@
+name: Build SM8150 device-support kernel
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_ref:
+        description: SM8150 kernel tag, branch, or commit
+        required: true
+        default: v6.17.0-sm8150
+  push:
+    paths:
+      - '.github/workflows/build-device-kernel.yml'
+      - 'README.md'
+  schedule:
+    - cron: '23 4 * * 1'
+permissions:
+  contents: read
+concurrency:
+  group: device-kernel
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      SRC: https://gitlab.postmarketos.org/soc/qualcomm-sm8150/linux.git
+      REF: ${{ inputs.kernel_ref || 'v6.17.0-sm8150' }}
+      CROSS_COMPILE: aarch64-linux-gnu-
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential cpio flex gcc-aarch64-linux-gnu git libelf-dev libssl-dev lz4 pahole python3 rsync zstd
+      - name: Fetch source
+        run: |
+          git clone --filter=blob:none --no-checkout "$SRC" kernel
+          git -C kernel fetch --force --tags origin
+          git -C kernel checkout --detach "$REF"
+          git -C kernel log -1 --format='source_commit=%H%nsubject=%s' | tee source.txt
+          test -f kernel/arch/arm64/configs/sm8150.config
+      - name: Build kernel, modules and DTBs
+        run: |
+          set -euxo pipefail
+          cd kernel
+          make ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" O=out sm8150.config
+          scripts/config --file out/.config --enable EFI --enable EFI_STUB --enable EXT4_FS --enable DEVTMPFS --enable DEVTMPFS_MOUNT --enable BLK_DEV_INITRD
+          make ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" O=out olddefconfig
+          make -j"$(nproc)" ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" O=out Image modules dtbs
+          DTB="$(find out/arch/arm64/boot/dts -type f -name sm8150-google-flame.dtb -print -quit)"
+          test -s out/arch/arm64/boot/Image
+          test -n "$DTB" && test -s "$DTB"
+          REL="$(make ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" O=out -s kernelrelease)"
+          mkdir -p "$GITHUB_WORKSPACE/stage"
+          cp out/arch/arm64/boot/Image "$GITHUB_WORKSPACE/stage/Image"
+          cp "$DTB" "$GITHUB_WORKSPACE/stage/sm8150-google-flame.dtb"
+          cp out/.config out/System.map "$GITHUB_WORKSPACE/stage/"
+          make ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" O=out INSTALL_MOD_PATH="$GITHUB_WORKSPACE/stage/modules" modules_install
+          tar --zstd -cf "$GITHUB_WORKSPACE/stage/modules.tar.zst" -C "$GITHUB_WORKSPACE/stage/modules" lib/modules
+          printf 'ref=%s\nkernelrelease=%s\n' "$REF" "$REL" > "$GITHUB_WORKSPACE/stage/MANIFEST.txt"
+          cat "$GITHUB_WORKSPACE/source.txt" >> "$GITHUB_WORKSPACE/stage/MANIFEST.txt"
+          cd "$GITHUB_WORKSPACE/stage"
+          sha256sum Image sm8150-google-flame.dtb config System.map modules.tar.zst > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flame-kernel-device-support-${{ github.run_number }}
+          path: stage/
+          if-no-files-found: error
+          retention-days: 30
