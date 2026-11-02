@@ -15,7 +15,7 @@
 #include <linux/i2c.h>
 #include <linux/regmap.h>
 #include <linux/gpio.h>
-#include <linux/of_gpio.h>
+#include <linux/gpio/consumer.h>
 
 enum max77826_registers {
 	MAX77826_REG_INT_SRC = 0x00,
@@ -155,7 +155,7 @@ enum max77826_regulators {
 
 struct max77826_regulator_info {
 	struct regmap *regmap;
-	int enable_gpio;
+	struct gpio_desc *enable_gpio;
 };
 
 static const struct regmap_config max77826_regmap_config = {
@@ -256,15 +256,11 @@ static int max77826_i2c_probe(struct i2c_client *client)
 
 	info->regmap = regmap;
 
-	info->enable_gpio = of_get_named_gpio(dev->of_node, "maxim,enable-gpio", 0);
-	if (gpio_is_valid(info->enable_gpio)) {
-		rc = devm_gpio_request_one(dev, info->enable_gpio, 
-					   GPIOF_OUT_INIT_HIGH, "MAX77826 ENABLE");
-		if (rc) {
-			dev_err(dev, "Failed to request enable GPIO %d: %d\n",
-				info->enable_gpio, rc);
-			return rc;
-		}
+	info->enable_gpio = devm_gpiod_get_optional(dev, "maxim,enable", GPIOD_OUT_HIGH);
+	if (IS_ERR(info->enable_gpio)) {
+		rc = PTR_ERR(info->enable_gpio);
+		dev_err(dev, "Failed to request enable GPIO: %d\n", rc);
+		return rc;
 	}
 
 	i2c_set_clientdata(client, info);
@@ -290,8 +286,8 @@ static void max77826_i2c_remove(struct i2c_client *client)
 {
 	struct max77826_regulator_info *info = i2c_get_clientdata(client);
 
-	if (gpio_is_valid(info->enable_gpio))
-		gpio_set_value(info->enable_gpio, 0);
+	if (info->enable_gpio)
+		gpiod_set_value_cansleep(info->enable_gpio, 0);
 }
 
 static const struct of_device_id __maybe_unused max77826_of_match[] = {

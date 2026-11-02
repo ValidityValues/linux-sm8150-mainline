@@ -242,6 +242,7 @@ struct smb_chip {
 	unsigned int base;
 	struct regmap *regmap;
 	struct power_supply_battery_info *batt_info;
+	int initial_charge_enable;
 	enum smb_generation gen;
 
 	struct delayed_work status_change_work;
@@ -574,19 +575,10 @@ static int smb2_get_prop_health(struct smb_chip *chip, int *val)
 		return 0;
 	case SMB2_BAT_TEMP_STATUS_HOT_SOFT_LIMIT_BIT:
 		*val = POWER_SUPPLY_HEALTH_WARM;
-	else
+		return 0;
+	default:
 		*val = POWER_SUPPLY_HEALTH_GOOD;
-
-	return 0;
-}
-
-static int smb_get_prop_health(struct smb_chip *chip, int *val)
-{
-	switch (chip->gen) {
-	case SMB2:
-		return smb2_get_prop_health(chip, val);
-	case SMB5:
-		return smb5_get_prop_health(chip, val);
+		return 0;
 	}
 }
 
@@ -1009,6 +1001,7 @@ static int smb_probe(struct platform_device *pdev)
 	struct smb_chip *chip;
 	const struct smb_match_data *match_data;
 	int rc, irq;
+	int float_voltage_uv = 0, float_voltage_sel = 0;
 
 	chip = devm_kzalloc(&pdev->dev, sizeof(*chip), GFP_KERNEL);
 	if (!chip)

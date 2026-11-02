@@ -1096,3 +1096,24 @@ bool of_gpiochip_instance_match(struct gpio_chip *gc, unsigned int index)
 
 	return false;
 }
+
+int of_get_named_gpio_flags(struct device_node *np, const char *propname,
+			   int index, enum of_gpio_flags *flags)
+{
+	struct gpio_desc *desc;
+	enum of_gpio_flags of_flags = 0;
+
+	desc = of_get_named_gpiod_flags(np, propname, index, &of_flags);
+	if (IS_ERR(desc))
+		return PTR_ERR(desc);
+	if (flags)
+		*flags = of_flags;
+	return desc_to_gpio(desc);
+}
+EXPORT_SYMBOL_GPL(of_get_named_gpio_flags);
+
+int of_get_named_gpio(struct device_node *np, const char *propname, int index)
+{
+	return of_get_named_gpio_flags(np, propname, index, NULL);
+}
+EXPORT_SYMBOL_GPL(of_get_named_gpio);
